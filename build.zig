@@ -3,8 +3,7 @@ const std = @import("std");
 /// This build script defines both a reusable library module and an executable
 /// front‑end for the HyprIngMyBorder project.  The library exposes
 /// functionality for animating Hyprland window borders, while the CLI
-/// provides a simple command‑line interface to control the animation speed
-/// and update frequency.
+/// provides a comprehensive command‑line interface with modular architecture.
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -17,15 +16,56 @@ pub fn build(b: *std.Build) void {
         .target = target,
     });
 
-    // Define the CLI executable.  Its root module is src/main.zig which
-    // imports `hypringmyborder` and parses command‑line arguments.
+    // Utilities module (no dependencies)
+    const utils_mod = b.addModule("utils", .{
+        .root_source_file = b.path("src/utils/mod.zig"),
+        .target = target,
+    });
+
+    // Configuration module (depends on utils)
+    const config_mod = b.addModule("config", .{
+        .root_source_file = b.path("src/config/mod.zig"),
+        .target = target,
+        .imports = &.{
+            .{ .name = "utils", .module = utils_mod },
+        },
+    });
+
+    // Animation providers module (depends on config and utils)
+    const animations_mod = b.addModule("animations", .{
+        .root_source_file = b.path("src/animations/mod.zig"),
+        .target = target,
+        .imports = &.{
+            .{ .name = "config", .module = config_mod },
+            .{ .name = "utils", .module = utils_mod },
+        },
+    });
+
+    // CLI module (depends on config, utils, and animations)
+    const cli_mod = b.addModule("cli", .{
+        .root_source_file = b.path("src/cli/mod.zig"),
+        .target = target,
+        .imports = &.{
+            .{ .name = "config", .module = config_mod },
+            .{ .name = "utils", .module = utils_mod },
+            .{ .name = "animations", .module = animations_mod },
+        },
+    });
+
+    // Define the CLI executable with all module dependencies
     const exe = b.addExecutable(.{
         .name = "hypringmyborder",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
-            .imports = &.{ .{ .name = "hypringmyborder", .module = hypr_mod } },
+            .imports = &.{
+                .{ .name = "hypringmyborder", .module = hypr_mod },
+                .{ .name = "cli", .module = cli_mod },
+                .{ .name = "config", .module = config_mod },
+                .{ .name = "animations", .module = animations_mod },
+                .{ .name = "utils", .module = utils_mod },
+            },
         }),
     });
 
