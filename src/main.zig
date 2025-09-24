@@ -106,7 +106,7 @@ fn runWithFps(allocator: std.mem.Allocator, fps: u32) !void {
 /// so that it works even if stdout is being piped elsewhere.
 fn printMenu() void {
     std.debug.print(
-        "\nHyprIngMyBorder CLI\n" ++ "Select an option:\n" ++ "  1) Run with 15 FPS\n" ++ "  2) Run with 30 FPS\n" ++ "  3) Run with 60 FPS\n" ++ "  4) Install autostart\n" ++ "  5) Exit\n",
+        "\nHypringMyBorder CLI\n" ++ "Select an option:\n" ++ "  1) Run with 15 FPS\n" ++ "  2) Run with 30 FPS\n" ++ "  3) Run with 60 FPS\n" ++ "  4) Install autostart\n" ++ "  5) Exit\n",
         .{},
     );
 }
@@ -301,4 +301,3 @@ pub fn main() !void {
 
     try runWithFps(allocator, fps);
 }
-
