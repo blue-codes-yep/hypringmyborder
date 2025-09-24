@@ -35,14 +35,11 @@ zig-out/bin/hypringmyborder
 
 ### Run manually
 ```bash
-./zig-out/bin/hypringmyborder &
+./zig-out/bin/hypringmyborder --configure
 ```
 
 ### Autostart with Hyprland
-Add this to your `hyprland.conf`:
-```ini
-exec = ~/.local/bin/hypringmyborder
-```
+Select the Autostart option from the cli when running the --configure
 
 ---
 
