@@ -68,6 +68,8 @@ pub fn build(b: *std.Build) void {
         "src/main.zig",
         "tests/test_config.zig",
         "tests/test_animations.zig",
+        "tests/test_preview.zig",
+        "tests/test_hyprland_ipc.zig",
     };
 
     const test_step = b.step("test", "Run all unit tests (use --summary all for detailed output)");
