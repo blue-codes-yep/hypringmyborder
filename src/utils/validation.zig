@@ -9,6 +9,8 @@ pub const ValidationError = error{
     SpeedOutOfRange,
     InvalidPresetName,
     InsufficientColors,
+    PresetNameTooLong,
+    EmptyPresetName,
 };
 
 /// Validate FPS value
@@ -27,8 +29,12 @@ pub fn validateSpeed(speed: f64) ValidationError!void {
 
 /// Validate preset name
 pub fn validatePresetName(name: []const u8) ValidationError!void {
-    if (name.len == 0 or name.len > 64) {
-        return ValidationError.InvalidPresetName;
+    if (name.len == 0) {
+        return ValidationError.EmptyPresetName;
+    }
+
+    if (name.len > 64) {
+        return ValidationError.PresetNameTooLong;
     }
 
     // Check for invalid characters
@@ -69,7 +75,10 @@ pub fn validateHsvColor(h: f64, s: f64, v: f64) ValidationError!void {
 
 /// Validate minimum color count for animation type
 pub fn validateColorCount(animation_type_str: []const u8, color_count: usize) ValidationError!void {
-    if (std.mem.eql(u8, animation_type_str, "pulse")) {
+    if (std.mem.eql(u8, animation_type_str, "rainbow")) {
+        // Rainbow doesn't require specific colors, so always valid
+        return;
+    } else if (std.mem.eql(u8, animation_type_str, "pulse")) {
         if (color_count < 1) {
             return ValidationError.InsufficientColors;
         }
@@ -82,7 +91,7 @@ pub fn validateColorCount(animation_type_str: []const u8, color_count: usize) Va
             return ValidationError.InsufficientColors;
         }
     }
-    // Rainbow doesn't require specific colors
+    // Unknown animation type - should not happen, but let it pass
 }
 
 /// Provide user-friendly error messages
@@ -91,7 +100,9 @@ pub fn getErrorMessage(err: ValidationError) []const u8 {
         ValidationError.InvalidColorFormat => "Invalid color format. Use #RRGGBB hex format.",
         ValidationError.FpsOutOfRange => "FPS must be between 1 and 120.",
         ValidationError.SpeedOutOfRange => "Speed must be between 0.001 and 1.0.",
-        ValidationError.InvalidPresetName => "Preset name must be 1-64 characters, alphanumeric, spaces, hyphens, or underscores only.",
+        ValidationError.InvalidPresetName => "Preset name contains invalid characters. Use alphanumeric, spaces, hyphens, or underscores only.",
         ValidationError.InsufficientColors => "This animation type requires more colors to be configured.",
+        ValidationError.PresetNameTooLong => "Preset name must be 64 characters or less.",
+        ValidationError.EmptyPresetName => "Preset name cannot be empty.",
     };
 }
