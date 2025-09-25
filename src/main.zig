@@ -22,15 +22,17 @@ fn printHelp() void {
         \\
         \\Usage:
         \\  hypringmyborder           Run with last saved configuration
-        \\  hypringmyborder --cli     Open interactive configuration menu
+        \\  hypringmyborder --tui     Open Terminal User Interface
+        \\  hypringmyborder --cli     Open interactive configuration menu (legacy)
         \\  hypringmyborder --help    Show this help information
         \\
-        \\The interactive menu (--cli) provides:
+        \\The Terminal User Interface (--tui) provides:
         \\  - Multiple animation types (rainbow, pulse, gradient, solid)
         \\  - Live preview of changes
         \\  - Preset management
         \\  - Fine-grained configuration options
         \\  - Hyprland environment validation
+        \\  - Visual status indicators and real-time feedback
         \\
     , .{});
 }
@@ -117,8 +119,8 @@ fn runWithSavedConfig(allocator: std.mem.Allocator) !void {
     }
 }
 
-/// Run interactive CLI configuration
-fn runInteractiveCLI(allocator: std.mem.Allocator) !void {
+/// Run Terminal User Interface
+fn runTUI(allocator: std.mem.Allocator) !void {
     // Check environment and show status
     const env_status = utils.environment.checkEnvironment(allocator) catch |err| {
         std.debug.print("Error checking environment: {s}\n", .{@errorName(err)});
@@ -129,35 +131,33 @@ fn runInteractiveCLI(allocator: std.mem.Allocator) !void {
         mut_status.deinit(allocator);
     }
 
-    // Show environment status if there are issues
-    if (!env_status.hyprland_running or !env_status.socket_accessible) {
-        utils.environment.printEnvironmentStatus(&env_status);
+    // Show environment status if there are critical issues
+    if (!env_status.hyprland_running) {
+        std.debug.print("Warning: Hyprland is not running. Live preview will be unavailable.\n", .{});
+        std.debug.print("You can still configure settings and they will be saved for later use.\n", .{});
+        std.debug.print("Press Enter to continue or Ctrl+C to exit...\n", .{});
 
-        if (!env_status.hyprland_running) {
-            std.debug.print("Hyprland is not running. Some features will be unavailable.\n", .{});
-            std.debug.print("You can still configure settings, but live preview won't work.\n\n", .{});
-        }
+        // Wait for user confirmation
+        const stdin_file = std.fs.File{ .handle = 0 };
+        var buffer: [1]u8 = undefined;
+        _ = try stdin_file.read(buffer[0..]);
     }
 
-    // Initialize TUI system (placeholder for now)
-    // This will be implemented in subsequent TUI tasks
+    // Initialize and run TUI application
+    var tui_app = tui.TUIApp.init(allocator) catch |err| {
+        std.debug.print("Error initializing TUI: {s}\n", .{@errorName(err)});
+        return;
+    };
+    defer tui_app.deinit();
 
-    // Initialize preview manager if Hyprland is available
-    var preview_manager: ?tui.preview.PreviewManager = null;
-    if (env_status.hyprland_running and env_status.socket_accessible) {
-        preview_manager = tui.preview.PreviewManager.init(allocator) catch |err| blk: {
-            std.debug.print("Warning: Could not initialize preview manager: {s}\n", .{@errorName(err)});
-            break :blk null;
-        };
-    }
-    defer if (preview_manager) |*pm| pm.deinit();
+    // Run the TUI
+    try tui_app.run();
+}
 
-    // TODO: Set up main menu structure and run menu loop
-    // This will be implemented in subsequent tasks
-
-    std.debug.print("Interactive CLI configuration is not yet fully implemented.\n", .{});
-    std.debug.print("This will be completed in the next implementation tasks.\n", .{});
-    std.debug.print("For now, you can run without arguments to use the default animation.\n", .{});
+/// Run interactive CLI configuration (legacy mode)
+fn runInteractiveCLI(allocator: std.mem.Allocator) !void {
+    std.debug.print("Legacy CLI mode. Use --tui for the enhanced Terminal User Interface.\n", .{});
+    try runTUI(allocator);
 }
 
 /// Entry point for the CLI application
@@ -172,7 +172,10 @@ pub fn main() !void {
     // Parse command line arguments
     if (args.len > 1) {
         const arg1 = args[1];
-        if (std.mem.eql(u8, arg1, "--cli")) {
+        if (std.mem.eql(u8, arg1, "--tui")) {
+            try runTUI(allocator);
+            return;
+        } else if (std.mem.eql(u8, arg1, "--cli")) {
             try runInteractiveCLI(allocator);
             return;
         } else if (std.mem.eql(u8, arg1, "--help") or std.mem.eql(u8, arg1, "-h")) {
