@@ -31,6 +31,11 @@ pub fn build(b: *std.Build) void {
     const tui_mod = b.addModule("tui", .{
         .root_source_file = b.path("src/tui/mod.zig"),
         .target = target,
+        .imports = &.{
+            .{ .name = "config", .module = config_mod },
+            .{ .name = "utils", .module = utils_mod },
+            .{ .name = "animations", .module = animations_mod },
+        },
     });
 
     // Main executable
@@ -62,6 +67,7 @@ pub fn build(b: *std.Build) void {
     const unit_test_files = &[_][]const u8{
         "src/main.zig",
         "tests/test_config.zig",
+        "tests/test_animations.zig",
     };
 
     const test_step = b.step("test", "Run all unit tests (use --summary all for detailed output)");

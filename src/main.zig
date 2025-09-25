@@ -11,9 +11,9 @@
 
 const std = @import("std");
 const hypr = @import("hypringmyborder");
-const cli = @import("cli");
 const config = @import("config");
 const utils = @import("utils");
+const tui = @import("tui");
 
 /// Print help information
 fn printHelp() void {
@@ -139,21 +139,16 @@ fn runInteractiveCLI(allocator: std.mem.Allocator) !void {
         }
     }
 
-    // Initialize menu system
-    var menu_system = cli.menu.MenuSystem.init(allocator);
-    defer menu_system.deinit();
+    // Initialize TUI system (placeholder for now)
+    // This will be implemented in subsequent TUI tasks
 
     // Initialize preview manager if Hyprland is available
-    var preview_manager: ?cli.preview.PreviewManager = null;
+    var preview_manager: ?tui.preview.PreviewManager = null;
     if (env_status.hyprland_running and env_status.socket_accessible) {
-        preview_manager = cli.preview.PreviewManager.init(allocator) catch |err| blk: {
+        preview_manager = tui.preview.PreviewManager.init(allocator) catch |err| blk: {
             std.debug.print("Warning: Could not initialize preview manager: {s}\n", .{@errorName(err)});
             break :blk null;
         };
-
-        if (preview_manager) |*pm| {
-            menu_system.setPreviewManager(pm);
-        }
     }
     defer if (preview_manager) |*pm| pm.deinit();
 

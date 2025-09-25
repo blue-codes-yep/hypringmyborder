@@ -14,9 +14,10 @@ pub const AnimationProvider = struct {
     const Self = @This();
 
     ptr: *anyopaque,
+    allocator: std.mem.Allocator,
     updateFn: *const fn (ptr: *anyopaque, allocator: std.mem.Allocator, socket_path: []const u8, time: f64) anyerror!void,
     configureFn: *const fn (ptr: *anyopaque, animation_config: config.AnimationConfig) anyerror!void,
-    cleanupFn: *const fn (ptr: *anyopaque) void,
+    cleanupFn: *const fn (ptr: *anyopaque, allocator: std.mem.Allocator) void,
 
     pub fn update(self: *Self, allocator: std.mem.Allocator, socket_path: []const u8, time: f64) !void {
         try self.updateFn(self.ptr, allocator, socket_path, time);
@@ -27,7 +28,7 @@ pub const AnimationProvider = struct {
     }
 
     pub fn cleanup(self: *Self) void {
-        self.cleanupFn(self.ptr);
+        self.cleanupFn(self.ptr, self.allocator);
     }
 };
 

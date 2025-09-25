@@ -89,9 +89,10 @@ fn configureWrapper(ptr: *anyopaque, animation_config: config.AnimationConfig) !
     try self.configure(animation_config);
 }
 
-fn cleanupWrapper(ptr: *anyopaque) void {
+fn cleanupWrapper(ptr: *anyopaque, allocator: std.mem.Allocator) void {
     const self = @as(*PulseAnimation, @ptrCast(@alignCast(ptr)));
     self.cleanup();
+    allocator.destroy(self);
 }
 
 pub fn create(allocator: std.mem.Allocator) !AnimationProvider {
@@ -100,6 +101,7 @@ pub fn create(allocator: std.mem.Allocator) !AnimationProvider {
 
     return AnimationProvider{
         .ptr = pulse_anim,
+        .allocator = allocator,
         .updateFn = updateWrapper,
         .configureFn = configureWrapper,
         .cleanupFn = cleanupWrapper,
