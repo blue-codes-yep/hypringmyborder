@@ -120,9 +120,30 @@ pub fn parseSimpleInput(input: []const u8) !Event {
                 'D' => KeyEvent{ .key = Key.left },
                 else => KeyEvent{ .key = Key.unknown },
             } };
-        } else {
-            // Plain ESC key
+        } else if (input.len >= 3 and input[1] == 'O') {
+            // Function key escape sequence (F1-F4)
+            return Event{ .key = switch (input[2]) {
+                'P' => KeyEvent{ .key = Key.f1 },
+                'Q' => KeyEvent{ .key = Key.f2 },
+                'R' => KeyEvent{ .key = Key.f3 },
+                'S' => KeyEvent{ .key = Key.f4 },
+                else => KeyEvent{ .key = Key.unknown },
+            } };
+        } else if (input.len >= 4 and input[1] == '[' and input[3] == '~') {
+            // Alternative function key format [1~, [2~, etc.
+            return Event{ .key = switch (input[2]) {
+                '1' => KeyEvent{ .key = Key.f1 },
+                '2' => KeyEvent{ .key = Key.f2 },
+                '3' => KeyEvent{ .key = Key.f3 },
+                '4' => KeyEvent{ .key = Key.f4 },
+                else => KeyEvent{ .key = Key.unknown },
+            } };
+        } else if (input.len == 1) {
+            // Plain ESC key (only if it's a single character)
             return Event{ .key = KeyEvent{ .key = Key.escape } };
+        } else {
+            // Unknown escape sequence
+            return Event{ .key = KeyEvent{ .key = Key.unknown } };
         }
     }
 
@@ -171,13 +192,16 @@ pub fn testSimpleEvents() !void {
                     .down => std.debug.print("DOWN arrow\n", .{}),
                     .left => std.debug.print("LEFT arrow\n", .{}),
                     .right => std.debug.print("RIGHT arrow\n", .{}),
+                    .f1 => std.debug.print("F1\n", .{}),
+                    .f2 => std.debug.print("F2\n", .{}),
+                    .f3 => std.debug.print("F3\n", .{}),
+                    .f4 => std.debug.print("F4\n", .{}),
                     .char => {
                         if (key_event.char) |c| {
                             std.debug.print("'{c}'\n", .{c});
                         }
                     },
                     .unknown => std.debug.print("Unknown key\n", .{}),
-                    else => std.debug.print("Other key: {}\n", .{key_event.key}),
                 }
             },
         }
