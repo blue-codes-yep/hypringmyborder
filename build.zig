@@ -70,6 +70,8 @@ pub fn build(b: *std.Build) void {
         "tests/test_animations.zig",
         "tests/test_preview.zig",
         "tests/test_hyprland_ipc.zig",
+        "tests/test_tui_components.zig",
+        "tests/test_tui_screens.zig",
     };
 
     const test_step = b.step("test", "Run all unit tests (use --summary all for detailed output)");

@@ -5,11 +5,14 @@ const std = @import("std");
 const renderer = @import("renderer.zig");
 const events = @import("events.zig");
 const components = @import("components/mod.zig");
+const screens = @import("screens/mod.zig");
 const preview = @import("preview.zig");
 const config = @import("config");
 
 pub const Screen = enum {
     main,
+    animation_settings,
+    preset_management,
     help,
 };
 
@@ -28,6 +31,11 @@ pub const TUIApp = struct {
     main_panels: [4]components.Panel,
     status_text: components.Text,
     help_text: components.Text,
+    focused_panel: usize,
+
+    // Advanced screens
+    animation_settings_panel: ?screens.AnimationSettingsPanel,
+    preset_management_panel: ?screens.PresetManagementPanel,
 
     pub fn init(allocator: std.mem.Allocator) !TUIApp {
         const r = try renderer.Renderer.init(allocator);
@@ -70,6 +78,9 @@ pub const TUIApp = struct {
             .main_panels = main_panels,
             .status_text = status_text,
             .help_text = help_text,
+            .focused_panel = 0,
+            .animation_settings_panel = null,
+            .preset_management_panel = null,
         };
     }
 
@@ -91,6 +102,8 @@ pub const TUIApp = struct {
 
         switch (self.current_screen) {
             .main => try self.renderMainScreen(),
+            .animation_settings => try self.renderAnimationSettingsScreen(),
+            .preset_management => try self.renderPresetManagementScreen(),
             .help => try self.renderHelpScreen(),
         }
     }
@@ -122,32 +135,44 @@ pub const TUIApp = struct {
     fn renderAnimationSettingsPanel(self: *TUIApp, area: @import("components/panel.zig").ContentArea) !void {
         var y = area.y + 1;
 
-        // Animation type
-        const type_text = try std.fmt.allocPrint(self.allocator, "Type: {s}", .{self.current_config.animation_type.toString()});
+        const main_text = components.Text.initWithStyle("Animation Configuration", area.x + 1, y, renderer.TextStyle{ .fg_color = renderer.Color.WHITE, .bold = true });
+        try main_text.render(&self.renderer);
+        y += 2;
+
+        const help_text = components.Text.initWithStyle("Press Enter to open", area.x + 1, y, renderer.TextStyle{ .fg_color = renderer.Color.CYAN });
+        try help_text.render(&self.renderer);
+        y += 2;
+
+        // Current settings preview
+        const type_text = try std.fmt.allocPrint(self.allocator, "Current: {s}", .{self.current_config.animation_type.toString()});
         defer self.allocator.free(type_text);
         const type_display = components.Text.init(type_text, area.x + 1, y);
         try type_display.render(&self.renderer);
         y += 1;
 
-        // FPS
-        const fps_text = try std.fmt.allocPrint(self.allocator, "FPS:  {d}", .{self.current_config.fps});
+        const fps_text = try std.fmt.allocPrint(self.allocator, "FPS: {d}", .{self.current_config.fps});
         defer self.allocator.free(fps_text);
         const fps_display = components.Text.init(fps_text, area.x + 1, y);
         try fps_display.render(&self.renderer);
         y += 1;
 
-        // Speed
         const speed_text = try std.fmt.allocPrint(self.allocator, "Speed: {d:.3}", .{self.current_config.speed});
         defer self.allocator.free(speed_text);
         const speed_display = components.Text.init(speed_text, area.x + 1, y);
         try speed_display.render(&self.renderer);
+        y += 2;
+
+        // Features
+        const features_text = components.Text.init("• Visual color pickers", area.x + 1, y);
+        try features_text.render(&self.renderer);
         y += 1;
 
-        // Direction
-        const dir_text = try std.fmt.allocPrint(self.allocator, "Dir:  {s}", .{self.current_config.direction.toString()});
-        defer self.allocator.free(dir_text);
-        const dir_display = components.Text.init(dir_text, area.x + 1, y);
-        try dir_display.render(&self.renderer);
+        const features_text2 = components.Text.init("• Live preview", area.x + 1, y);
+        try features_text2.render(&self.renderer);
+        y += 1;
+
+        const features_text3 = components.Text.init("• Advanced controls", area.x + 1, y);
+        try features_text3.render(&self.renderer);
     }
 
     fn renderLivePreviewPanel(self: *TUIApp, area: @import("components/panel.zig").ContentArea) !void {
@@ -248,11 +273,20 @@ pub const TUIApp = struct {
     }
 
     fn renderPresetsPanel(self: *TUIApp, area: @import("components/panel.zig").ContentArea) !void {
-        const placeholder_text = components.Text.init("Preset management", area.x + 1, area.y + 1);
-        try placeholder_text.render(&self.renderer);
+        const main_text = components.Text.initWithStyle("Preset Management", area.x + 1, area.y + 1, renderer.TextStyle{ .fg_color = renderer.Color.WHITE, .bold = true });
+        try main_text.render(&self.renderer);
 
-        const help_text = components.Text.init("(Coming soon)", area.x + 1, area.y + 2);
+        const help_text = components.Text.initWithStyle("Press Enter to open", area.x + 1, area.y + 3, renderer.TextStyle{ .fg_color = renderer.Color.CYAN });
         try help_text.render(&self.renderer);
+
+        const features_text = components.Text.init("• Load/Save presets", area.x + 1, area.y + 5);
+        try features_text.render(&self.renderer);
+
+        const features_text2 = components.Text.init("• Delete/Rename", area.x + 1, area.y + 6);
+        try features_text2.render(&self.renderer);
+
+        const features_text3 = components.Text.init("• Visual management", area.x + 1, area.y + 7);
+        try features_text3.render(&self.renderer);
     }
 
     fn renderSystemStatusPanel(self: *TUIApp, area: @import("components/panel.zig").ContentArea) !void {
@@ -330,6 +364,8 @@ pub const TUIApp = struct {
             .key => |key_event| {
                 switch (self.current_screen) {
                     .main => try self.handleMainScreenInput(key_event),
+                    .animation_settings => try self.handleAnimationSettingsInput(key_event),
+                    .preset_management => try self.handlePresetManagementInput(key_event),
                     .help => try self.handleHelpScreenInput(key_event),
                 }
             },
@@ -356,7 +392,7 @@ pub const TUIApp = struct {
                 try self.switchFocus();
             },
             .enter => {
-                // TODO: Handle panel-specific actions
+                try self.handlePanelActivation();
             },
             .char => {
                 if (key_event.char) |c| {
@@ -387,29 +423,130 @@ pub const TUIApp = struct {
     }
 
     fn switchFocus(self: *TUIApp) !void {
-        // Find currently focused panel
-        var current_focus: ?usize = null;
-        for (&self.main_panels, 0..) |*panel, i| {
-            if (panel.focused) {
-                panel.setFocus(false);
-                current_focus = i;
-                break;
-            }
-        }
+        // Clear current focus
+        self.main_panels[self.focused_panel].setFocus(false);
 
         // Move to next panel
-        const next_focus = if (current_focus) |focus|
-            (focus + 1) % self.main_panels.len
-        else
-            0;
+        self.focused_panel = (self.focused_panel + 1) % self.main_panels.len;
 
-        self.main_panels[next_focus].setFocus(true);
+        // Set new focus
+        self.main_panels[self.focused_panel].setFocus(true);
+    }
+
+    fn handlePanelActivation(self: *TUIApp) !void {
+        switch (self.focused_panel) {
+            0 => {
+                // Animation Settings panel
+                self.current_screen = Screen.animation_settings;
+                try self.initializeAnimationSettingsPanel();
+            },
+            1 => {
+                // Live Preview panel - toggle preview
+                try self.togglePreview();
+            },
+            2 => {
+                // Presets panel
+                self.current_screen = Screen.preset_management;
+                try self.initializePresetManagementPanel();
+            },
+            3 => {
+                // System Status panel - could show detailed system info
+                // For now, just do nothing
+            },
+            else => {},
+        }
+    }
+
+    fn initializeAnimationSettingsPanel(self: *TUIApp) !void {
+        if (self.animation_settings_panel == null) {
+            const terminal_size = self.renderer.getTerminalSize();
+            self.animation_settings_panel = try screens.AnimationSettingsPanel.init(self.allocator, 2, 2, terminal_size.width - 4, terminal_size.height - 4);
+
+            // Set current config
+            try self.animation_settings_panel.?.setAnimationConfig(self.current_config);
+        }
+    }
+
+    fn initializePresetManagementPanel(self: *TUIApp) !void {
+        if (self.preset_management_panel == null) {
+            const terminal_size = self.renderer.getTerminalSize();
+            self.preset_management_panel = try screens.PresetManagementPanel.init(self.allocator, 2, 2, terminal_size.width - 4, terminal_size.height - 4);
+        }
+    }
+
+    fn renderAnimationSettingsScreen(self: *TUIApp) !void {
+        if (self.animation_settings_panel) |*panel| {
+            // Update panel with current time for animations
+            const current_time = std.time.milliTimestamp();
+            panel.update(current_time);
+
+            try panel.render(&self.renderer);
+
+            // Show back instruction
+            const back_text = components.Text.initWithStyle("Press Esc to return to main screen", 2, self.renderer.getTerminalSize().height - 1, renderer.TextStyle{ .fg_color = renderer.Color.CYAN });
+            try back_text.render(&self.renderer);
+        }
+    }
+
+    fn renderPresetManagementScreen(self: *TUIApp) !void {
+        if (self.preset_management_panel) |*panel| {
+            try panel.render(&self.renderer);
+
+            // Show back instruction
+            const back_text = components.Text.initWithStyle("Press Esc to return to main screen", 2, self.renderer.getTerminalSize().height - 1, renderer.TextStyle{ .fg_color = renderer.Color.CYAN });
+            try back_text.render(&self.renderer);
+        }
+    }
+
+    fn handleAnimationSettingsInput(self: *TUIApp, key_event: events.KeyEvent) !void {
+        switch (key_event.key) {
+            .escape => {
+                // Save any changes to current config
+                if (self.animation_settings_panel) |*panel| {
+                    self.current_config = panel.getAnimationConfig();
+
+                    // Update preview if running
+                    if (self.preview_manager.isRunning()) {
+                        try self.preview_manager.updateConfig(self.current_config);
+                    }
+                }
+                self.current_screen = Screen.main;
+            },
+            else => {
+                // Pass event to animation settings panel
+                if (self.animation_settings_panel) |*panel| {
+                    _ = try panel.handleEvent(events.Event{ .key = key_event });
+                }
+            },
+        }
+    }
+
+    fn handlePresetManagementInput(self: *TUIApp, key_event: events.KeyEvent) !void {
+        switch (key_event.key) {
+            .escape => {
+                self.current_screen = Screen.main;
+            },
+            else => {
+                // Pass event to preset management panel
+                if (self.preset_management_panel) |*panel| {
+                    _ = try panel.handleEvent(events.Event{ .key = key_event });
+                }
+            },
+        }
     }
 
     pub fn deinit(self: *TUIApp) void {
         // Stop preview before cleanup
         self.preview_manager.stop();
         self.preview_manager.deinit();
+
+        // Clean up advanced panels
+        if (self.animation_settings_panel) |*panel| {
+            panel.deinit();
+        }
+        if (self.preset_management_panel) |*panel| {
+            panel.deinit();
+        }
 
         // Clean up configuration
         self.current_config.deinit(self.allocator);
