@@ -181,3 +181,29 @@ pub fn testConnection(socket_path: []const u8) bool {
 
     return true;
 }
+
+/// Get current border configuration from Hyprland
+pub fn getCurrentBorderConfig(allocator: std.mem.Allocator, socket_path: []const u8) ![]const u8 {
+    var sock = std.net.connectUnixSocket(socket_path) catch return HyprlandError.SocketConnectionFailed;
+    defer sock.close();
+
+    // Send command to get current border configuration
+    const command = "j/getoption general:col.active_border\n";
+    _ = sock.writeAll(command) catch return HyprlandError.CommandSendFailed;
+
+    // Read response
+    var buffer: [1024]u8 = undefined;
+    const bytes_read = sock.read(buffer[0..]) catch return HyprlandError.CommandSendFailed;
+
+    return try allocator.dupe(u8, buffer[0..bytes_read]);
+}
+
+/// Set border configuration in Hyprland (simplified restore) - This may not even need to be used with current design.
+pub fn setBorderConfig(socket_path: []const u8, config: []const u8) !void {
+    // For now, just send a simple border reset command
+    // In a full implementation, this would parse and restore the exact config
+    _ = config; // Unused for now
+
+    // Reset to a neutral border state
+    try sendKeywordCommand(socket_path, HyprlandBorderVars.ACTIVE_BORDER, "0xffffffff");
+}
