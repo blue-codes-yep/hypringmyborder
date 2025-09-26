@@ -5,6 +5,7 @@ const std = @import("std");
 
 var log_file: ?std.fs.File = null;
 var registered_signals: bool = false;
+var log_fd: c_int = -1;
 // Import needed C symbols
 const c = @cImport({
     @cInclude("signal.h");
@@ -43,6 +44,8 @@ pub fn initCrashLogger(allocator: std.mem.Allocator) !void {
         defer allocator.free(log_file_path);
 
         log_file = try std.fs.createFileAbsolute(log_file_path, .{});
+        // Cache raw fd for use in signal handler (avoid accessing File in signal context)
+        if (log_file) |f| log_fd = f.handle;
 
         // Log startup
         try logMessage("HyprIngMyBorder logger initialized (fallback)", .{});
@@ -65,6 +68,7 @@ pub fn initCrashLogger(allocator: std.mem.Allocator) !void {
     defer allocator.free(log_file_path);
 
     log_file = try std.fs.createFileAbsolute(log_file_path, .{});
+    if (log_file) |f| log_fd = f.handle;
 
     // Log startup
     try logMessage("HyprIngMyBorder logger initialized", .{});
@@ -76,6 +80,7 @@ pub fn deinitCrashLogger() void {
         logMessage("Logger shutting down normally", .{}) catch {};
         file.close();
         log_file = null;
+        log_fd = -1;
     }
 }
 
@@ -91,15 +96,11 @@ pub fn logMessage(comptime fmt: []const u8, args: anytype) !void {
 
 // Simple C signal handler that attempts to write a last log message and flush
 pub fn signal_handler(sig: c_int) callconv(.c) void {
-    // Avoid allocation here; write a simple message directly to the file descriptor if available
-    if (log_file) |file| {
-        // Try to write a minimal message
+    // Avoid allocation here; write a simple message directly to the cached file descriptor if available
+    if (log_fd >= 0) {
         const msg = "FATAL SIGNAL received\n";
-        // Use low-level write via file.handle
-        const fd = file.handle; // std.fs.File.handle is an int for libc fd
-        // Use libc write and fsync from c import
-        _ = c.write(fd, msg, msg.len);
-        _ = c.fsync(fd);
+        _ = c.write(log_fd, msg, msg.len);
+        _ = c.fsync(log_fd);
     }
     // Re-raise default handler for the signal to terminate with default action
     _ = c.signal(sig, c.SIG_DFL);

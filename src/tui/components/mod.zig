@@ -14,6 +14,7 @@ pub const Dropdown = @import("dropdown.zig").Dropdown;
 pub const validateNotEmpty = @import("input_field.zig").validateNotEmpty;
 pub const validateNumber = @import("input_field.zig").validateNumber;
 pub const validateFloat = @import("input_field.zig").validateFloat;
+pub const validateFpsInput = @import("input_field.zig").validateFpsInput;
 pub const validateHexColor = @import("input_field.zig").validateHexColor;
 
 // Re-export enums and types

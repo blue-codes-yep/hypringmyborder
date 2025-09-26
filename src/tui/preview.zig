@@ -309,14 +309,16 @@ pub const PreviewManager = struct {
                 {
                     self.stats_mutex.lock();
                     defer self.stats_mutex.unlock();
-                    self.stats.updateFrameStats(self.current_config.fps);
+                    const safe_fps = if (self.current_config.fps >= 1) self.current_config.fps else 1;
+                    self.stats.updateFrameStats(safe_fps);
                     self.stats.connection_status = true;
                 }
             }
 
             // Calculate frame timing
             const current_config = self.current_config;
-            const frame_time_ns = std.time.ns_per_s / current_config.fps;
+            const safe_fps = if (current_config.fps >= 1) current_config.fps else 1;
+            const frame_time_ns = std.time.ns_per_s / safe_fps;
             std.Thread.sleep(frame_time_ns);
         }
     }

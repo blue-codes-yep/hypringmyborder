@@ -228,6 +228,14 @@ pub const ColorPicker = struct {
             .key => |key_event| {
                 switch (key_event.key) {
                     .tab => {
+                        // If we're at the very last internal input (hsv mode, last field),
+                        // allow the Tab to bubble up so the panel can move focus to the
+                        // next component instead of wrapping inside the color picker.
+                        if (self.mode == ColorMode.hsv and self.focused_input == 2) {
+                            // Do not consume the Tab; let parent handle focus movement
+                            return false;
+                        }
+
                         switch (self.mode) {
                             .hex => {
                                 self.mode = ColorMode.rgb;
@@ -245,6 +253,7 @@ pub const ColorPicker = struct {
                                 if (self.focused_input < 2) {
                                     self.focused_input += 1;
                                 } else {
+                                    // Reached end of hsv inputs - cycle back to hex
                                     self.mode = ColorMode.hex;
                                     self.focused_input = 0;
                                 }
@@ -321,20 +330,11 @@ pub const ColorPicker = struct {
     pub fn render(self: *const ColorPicker, r: *renderer.Renderer) !void {
         if (!self.visible) return;
 
-        // Draw color preview
-        const preview_width: u16 = 6;
-        const preview_height: u16 = 3;
-
-        for (0..preview_height) |row| {
-            try r.moveCursor(self.x + self.width - preview_width, self.y + @as(u16, @intCast(row)));
-            try r.setTextStyle(renderer.TextStyle{ .bg_color = self.color });
-
-            var col: u16 = 0;
-            while (col < preview_width) : (col += 1) {
-                try r.stdout_file.writeAll(" ");
-            }
-        }
-        try r.resetStyle();
+        // Draw color preview using renderer helper
+        // Draw a block 3 rows high by 6 columns wide aligned to the right of the picker
+        try r.drawColorPreview(self.x + self.width - 6, self.y + 0, self.color);
+        try r.drawColorPreview(self.x + self.width - 6, self.y + 1, self.color);
+        try r.drawColorPreview(self.x + self.width - 6, self.y + 2, self.color);
 
         // Draw mode labels and inputs
         const label_style = renderer.TextStyle{
@@ -397,13 +397,14 @@ pub const ColorPicker = struct {
         self.y = y;
 
         // Update input field positions
-        self.hex_input.setPosition(x + 5, y);
-        self.r_input.setPosition(x + 2, y + 3);
-        self.g_input.setPosition(x + 7, y + 3);
-        self.b_input.setPosition(x + 12, y + 3);
-        self.h_input.setPosition(x + 2, y + 5);
-        self.s_input.setPosition(x + 7, y + 5);
-        self.v_input.setPosition(x + 12, y + 5);
+        // Positions mirror those used in init()
+        self.hex_input.setPosition(x, y + 1);
+        self.r_input.setPosition(x, y + 3);
+        self.g_input.setPosition(x + 5, y + 3);
+        self.b_input.setPosition(x + 10, y + 3);
+        self.h_input.setPosition(x, y + 5);
+        self.s_input.setPosition(x + 5, y + 5);
+        self.v_input.setPosition(x + 10, y + 5);
     }
 };
 

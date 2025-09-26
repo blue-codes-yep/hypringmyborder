@@ -60,6 +60,8 @@ pub const AnimationSettingsPanel = struct {
         };
 
         try panel.setupComponents();
+        // Apply initial config values now that setup is complete
+        try panel.updateComponentsFromConfig();
         return panel;
     }
 
@@ -79,6 +81,7 @@ pub const AnimationSettingsPanel = struct {
         // Setup animation type dropdown
         try self.animation_type_dropdown.addOption("Rainbow", "rainbow");
         try self.animation_type_dropdown.addOption("Pulse", "pulse");
+        try self.animation_type_dropdown.addOption("None", "none");
         try self.animation_type_dropdown.addOption("Gradient", "gradient");
         try self.animation_type_dropdown.addOption("Solid", "solid");
 
@@ -86,21 +89,19 @@ pub const AnimationSettingsPanel = struct {
         self.speed_input.setValidator(components.validateFloat);
         self.speed_input.setPlaceholder("1.0");
 
-        self.fps_input.setValidator(components.validateNumber);
+        self.fps_input.setValidator(components.validateFpsInput);
         self.fps_input.setPlaceholder("60");
 
         self.gradient_angle_input.setValidator(components.validateNumber);
         self.gradient_angle_input.setPlaceholder("45");
 
-        // Set initial values from config
-        try self.updateComponentsFromConfig();
-
+        // Set initial values from config will be performed by init after setup
         // Setup preview
         self.preview_progress.setLabel("Preview:");
         self.preview_progress.setShowPercentage(false);
         self.preview_progress.setTargetProgress(0.7);
 
-        // Set initial focus
+        // Set initial focus (will be re-applied after config update)
         self.updateFocus();
     }
 
@@ -109,6 +110,7 @@ pub const AnimationSettingsPanel = struct {
         const type_str = switch (self.animation_config.animation_type) {
             .rainbow => "rainbow",
             .pulse => "pulse",
+            .none => "none",
             .gradient => "gradient",
             .solid => "solid",
         };
@@ -166,6 +168,107 @@ pub const AnimationSettingsPanel = struct {
 
         // Set gradient angle (placeholder - not in current config)
         try self.gradient_angle_input.setText("45");
+
+        // Adjust visibility of color-related controls based on animation type
+        switch (self.animation_config.animation_type) {
+            .rainbow => {
+                self.primary_color_picker.setVisible(false);
+                self.secondary_color_picker.setVisible(false);
+                self.gradient_angle_input.setVisible(false);
+                self.shadow_color_picker.setVisible(true);
+            },
+            .pulse => {
+                self.primary_color_picker.setVisible(true);
+                self.secondary_color_picker.setVisible(false);
+                self.gradient_angle_input.setVisible(false);
+                self.shadow_color_picker.setVisible(true);
+            },
+            .gradient => {
+                self.primary_color_picker.setVisible(true);
+                self.secondary_color_picker.setVisible(true);
+                self.gradient_angle_input.setVisible(true);
+                self.shadow_color_picker.setVisible(true);
+            },
+            .solid => {
+                self.primary_color_picker.setVisible(true);
+                self.secondary_color_picker.setVisible(false);
+                self.gradient_angle_input.setVisible(false);
+                self.shadow_color_picker.setVisible(true);
+            },
+            .none => {
+                // No animation: hide color and gradient controls
+                self.primary_color_picker.setVisible(false);
+                self.secondary_color_picker.setVisible(false);
+                self.gradient_angle_input.setVisible(false);
+                self.shadow_color_picker.setVisible(false);
+            },
+        }
+
+        // Keep component_count static and let tab skip invisible components
+        self.component_count = 7;
+
+        // Reflow layout: compute y positions for controls based on visibility
+        const base_top = self.y;
+        const anim_type_y = base_top + 2;
+        const speed_y = base_top + 4;
+        const fps_y = base_top + 6;
+
+        // Restore fixed positions (keep inputs within the panel bounds)
+        self.primary_color_picker.setPosition(self.x + 2, self.y + 8);
+        self.secondary_color_picker.setPosition(self.x + 30, self.y + 8);
+        self.gradient_angle_input.setPosition(self.x + 2, self.y + 17);
+        self.shadow_color_picker.setPosition(self.x + 2, self.y + 19);
+
+        // Ensure dropdown, speed and fps stay at their anchor positions
+        self.animation_type_dropdown.setPosition(self.x + 2, anim_type_y);
+        self.speed_input.setPosition(self.x + 2, speed_y);
+        self.fps_input.setPosition(self.x + 2, fps_y);
+
+        // Ensure focused component is visible; if not, move to next visible
+        if (!self.isComponentVisible(self.focused_component)) {
+            var i: usize = 0;
+            var found = false;
+            while (i < self.component_count) : (i += 1) {
+                if (self.isComponentVisible(i)) {
+                    self.focused_component = i;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) self.focused_component = 0;
+        }
+
+        self.updateFocus();
+    }
+
+    fn getIndicatorPosition(self: *const AnimationSettingsPanel, idx: usize) [2]u16 {
+        const base_top = self.y;
+        const anim_type_y = base_top + 2;
+        const speed_y = base_top + 4;
+        const fps_y = base_top + 6;
+        return switch (idx) {
+            0 => [2]u16{ self.x, anim_type_y },
+            1 => [2]u16{ self.x, speed_y },
+            2 => [2]u16{ self.x, fps_y },
+            3 => [2]u16{ self.x, self.y + 8 },
+            4 => [2]u16{ self.x + 28, self.y + 8 },
+            5 => [2]u16{ self.x, self.y + 17 },
+            6 => [2]u16{ self.x, self.y + 19 },
+            else => [2]u16{ self.x, anim_type_y },
+        };
+    }
+
+    fn isComponentVisible(self: *const AnimationSettingsPanel, idx: usize) bool {
+        return switch (idx) {
+            0 => true,
+            1 => true,
+            2 => true,
+            3 => self.primary_color_picker.visible,
+            4 => self.secondary_color_picker.visible,
+            5 => self.gradient_angle_input.visible,
+            6 => self.shadow_color_picker.visible,
+            else => false,
+        };
     }
 
     fn updateConfigFromComponents(self: *AnimationSettingsPanel) !void {
@@ -175,6 +278,8 @@ pub const AnimationSettingsPanel = struct {
                 config.AnimationType.rainbow
             else if (std.mem.eql(u8, type_str, "pulse"))
                 config.AnimationType.pulse
+            else if (std.mem.eql(u8, type_str, "none"))
+                config.AnimationType.none
             else if (std.mem.eql(u8, type_str, "gradient"))
                 config.AnimationType.gradient
             else
@@ -200,26 +305,30 @@ pub const AnimationSettingsPanel = struct {
         }
         self.animation_config.colors.clearRetainingCapacity();
 
-        // Add primary color
-        const primary_color = self.primary_color_picker.getColor();
-        var primary_hex_buf: [8]u8 = undefined;
-        const primary_hex = std.fmt.bufPrint(primary_hex_buf[0..], "#{X:0>2}{X:0>2}{X:0>2}", .{ primary_color.r, primary_color.g, primary_color.b }) catch "#FF0000";
-        const primary_color_format = config.ColorFormat{ .hex = try self.allocator.dupe(u8, primary_hex) };
-        try self.animation_config.colors.append(self.allocator, primary_color_format);
+        // Add primary/secondary/shadow colors only for visible pickers
+        if (self.primary_color_picker.visible) {
+            const primary_color = self.primary_color_picker.getColor();
+            var primary_hex_buf: [8]u8 = undefined;
+            const primary_hex = std.fmt.bufPrint(primary_hex_buf[0..], "#{X:0>2}{X:0>2}{X:0>2}", .{ primary_color.r, primary_color.g, primary_color.b }) catch "#FF0000";
+            const primary_color_format = config.ColorFormat{ .hex = try self.allocator.dupe(u8, primary_hex) };
+            try self.animation_config.colors.append(self.allocator, primary_color_format);
+        }
 
-        // Add secondary color
-        const secondary_color = self.secondary_color_picker.getColor();
-        var secondary_hex_buf: [8]u8 = undefined;
-        const secondary_hex = std.fmt.bufPrint(secondary_hex_buf[0..], "#{X:0>2}{X:0>2}{X:0>2}", .{ secondary_color.r, secondary_color.g, secondary_color.b }) catch "#00FF00";
-        const secondary_color_format = config.ColorFormat{ .hex = try self.allocator.dupe(u8, secondary_hex) };
-        try self.animation_config.colors.append(self.allocator, secondary_color_format);
+        if (self.secondary_color_picker.visible) {
+            const secondary_color = self.secondary_color_picker.getColor();
+            var secondary_hex_buf: [8]u8 = undefined;
+            const secondary_hex = std.fmt.bufPrint(secondary_hex_buf[0..], "#{X:0>2}{X:0>2}{X:0>2}", .{ secondary_color.r, secondary_color.g, secondary_color.b }) catch "#00FF00";
+            const secondary_color_format = config.ColorFormat{ .hex = try self.allocator.dupe(u8, secondary_hex) };
+            try self.animation_config.colors.append(self.allocator, secondary_color_format);
+        }
 
-        // Add shadow color
-        const shadow_color = self.shadow_color_picker.getColor();
-        var shadow_hex_buf: [8]u8 = undefined;
-        const shadow_hex = std.fmt.bufPrint(shadow_hex_buf[0..], "#{X:0>2}{X:0>2}{X:0>2}", .{ shadow_color.r, shadow_color.g, shadow_color.b }) catch "#404040";
-        const shadow_color_format = config.ColorFormat{ .hex = try self.allocator.dupe(u8, shadow_hex) };
-        try self.animation_config.colors.append(self.allocator, shadow_color_format);
+        if (self.shadow_color_picker.visible) {
+            const shadow_color = self.shadow_color_picker.getColor();
+            var shadow_hex_buf: [8]u8 = undefined;
+            const shadow_hex = std.fmt.bufPrint(shadow_hex_buf[0..], "#{X:0>2}{X:0>2}{X:0>2}", .{ shadow_color.r, shadow_color.g, shadow_color.b }) catch "#404040";
+            const shadow_color_format = config.ColorFormat{ .hex = try self.allocator.dupe(u8, shadow_hex) };
+            try self.animation_config.colors.append(self.allocator, shadow_color_format);
+        }
 
         // Update gradient angle (placeholder - not stored in current config)
         _ = self.gradient_angle_input.isValid(); // Just validate but don't store
@@ -251,6 +360,10 @@ pub const AnimationSettingsPanel = struct {
                 const primary_color = self.primary_color_picker.getColor();
                 self.preview_progress.base.setColors(primary_color, renderer.Color{ .r = 48, .g = 48, .b = 48 });
             },
+            .none => {
+                // Static / no animation: use neutral colors
+                self.preview_progress.base.setColors(renderer.Color{ .r = 64, .g = 64, .b = 64 }, renderer.Color{ .r = 32, .g = 32, .b = 32 });
+            },
         }
     }
 
@@ -264,15 +377,15 @@ pub const AnimationSettingsPanel = struct {
         self.gradient_angle_input.setFocus(false);
         self.shadow_color_picker.setFocus(false);
 
-        // Set focus on current component
+        // Set focus on current component (only if visible)
         switch (self.focused_component) {
             0 => self.animation_type_dropdown.setFocus(true),
             1 => self.speed_input.setFocus(true),
             2 => self.fps_input.setFocus(true),
-            3 => self.primary_color_picker.setFocus(true),
-            4 => self.secondary_color_picker.setFocus(true),
-            5 => self.gradient_angle_input.setFocus(true),
-            6 => self.shadow_color_picker.setFocus(true),
+            3 => if (self.primary_color_picker.visible) self.primary_color_picker.setFocus(true),
+            4 => if (self.secondary_color_picker.visible) self.secondary_color_picker.setFocus(true),
+            5 => if (self.gradient_angle_input.visible) self.gradient_angle_input.setFocus(true),
+            6 => if (self.shadow_color_picker.visible) self.shadow_color_picker.setFocus(true),
             else => self.animation_type_dropdown.setFocus(true),
         }
     }
@@ -280,13 +393,35 @@ pub const AnimationSettingsPanel = struct {
     pub fn handleEvent(self: *AnimationSettingsPanel, event: events.Event) !bool {
         if (!self.visible) return false;
 
-        // Handle global navigation
+        // Try component-specific handling first for components that may want
+        // to consume Tab (ColorPicker uses Tab to switch modes).
+        var focused_handled = false;
+        switch (self.focused_component) {
+            3 => focused_handled = try self.primary_color_picker.handleEvent(event),
+            4 => focused_handled = try self.secondary_color_picker.handleEvent(event),
+            6 => focused_handled = try self.shadow_color_picker.handleEvent(event),
+            else => focused_handled = false,
+        }
+
+        if (focused_handled) {
+            try self.updateConfigFromComponents();
+            // Also refresh UI components (visibility/positions) from the updated config
+            try self.updateComponentsFromConfig();
+            return true;
+        }
+
+        // Handle global navigation (Tab moves between visible components)
         switch (event) {
             .key => |key_event| {
                 switch (key_event.key) {
                     .tab => {
-                        // Move to next component
-                        self.focused_component = (self.focused_component + 1) % self.component_count;
+                        // Move to next visible component
+                        var next_idx = (self.focused_component + 1) % self.component_count;
+                        var tries: usize = 0;
+                        while (!self.isComponentVisible(next_idx) and tries < self.component_count) : (tries += 1) {
+                            next_idx = (next_idx + 1) % self.component_count;
+                        }
+                        self.focused_component = next_idx;
                         self.updateFocus();
                         return true;
                     },
@@ -311,6 +446,8 @@ pub const AnimationSettingsPanel = struct {
                 handled = try self.animation_type_dropdown.handleEvent(event);
                 if (handled) {
                     try self.updateConfigFromComponents();
+                    // When the animation type changes, refresh component visibility and layout
+                    try self.updateComponentsFromConfig();
                 }
             },
             1 => {
@@ -326,6 +463,7 @@ pub const AnimationSettingsPanel = struct {
                 }
             },
             3 => {
+                // primary was already attempted above for Tab; still forward other events
                 handled = try self.primary_color_picker.handleEvent(event);
                 if (handled) {
                     try self.updateConfigFromComponents();
@@ -390,6 +528,10 @@ pub const AnimationSettingsPanel = struct {
                 // Static progress
                 self.preview_progress.setTargetProgress(0.5);
             },
+            .none => {
+                // No animation selected: keep preview static
+                self.preview_progress.setTargetProgress(0.0);
+            },
         }
     }
 
@@ -419,11 +561,15 @@ pub const AnimationSettingsPanel = struct {
         try self.fps_input.render(r);
         try r.drawText(self.x + 14, self.y + 6, "(1 - 120)", renderer.TextStyle{ .fg_color = renderer.Color{ .r = 128, .g = 128, .b = 128 } });
 
-        // Colors section
-        try r.drawText(self.x + 2, self.y + 7, "Primary Color:", label_style);
-        try r.drawText(self.x + 30, self.y + 7, "Secondary Color:", label_style);
-        try self.primary_color_picker.render(r);
-        try self.secondary_color_picker.render(r);
+        // Colors section (render only visible pickers)
+        if (self.primary_color_picker.visible) {
+            try r.drawText(self.x + 2, self.y + 7, "Primary Color:", label_style);
+            try self.primary_color_picker.render(r);
+        }
+        if (self.secondary_color_picker.visible) {
+            try r.drawText(self.x + 30, self.y + 7, "Secondary Color:", label_style);
+            try self.secondary_color_picker.render(r);
+        }
 
         // Gradient angle (only show for gradient animation)
         if (self.animation_config.animation_type == config.AnimationType.gradient) {
@@ -432,9 +578,11 @@ pub const AnimationSettingsPanel = struct {
             try r.drawText(self.x + 14, self.y + 17, "(0 - 360°)", renderer.TextStyle{ .fg_color = renderer.Color{ .r = 128, .g = 128, .b = 128 } });
         }
 
-        // Shadow color
-        try r.drawText(self.x + 2, self.y + 18, "Shadow Color:", label_style);
-        try self.shadow_color_picker.render(r);
+        // Shadow color (may be hidden for some animation types)
+        if (self.shadow_color_picker.visible) {
+            try r.drawText(self.x + 2, self.y + 18, "Shadow Color:", label_style);
+            try self.shadow_color_picker.render(r);
+        }
 
         // Preview section
         if (self.preview_enabled) {
@@ -456,23 +604,11 @@ pub const AnimationSettingsPanel = struct {
             .bold = true,
         };
 
-        const indicator_y = switch (self.focused_component) {
-            0 => self.y + 2, // Animation type
-            1 => self.y + 4, // Speed
-            2 => self.y + 6, // FPS
-            3 => self.y + 8, // Primary color
-            4 => self.y + 8, // Secondary color (same row)
-            5 => self.y + 17, // Gradient angle
-            6 => self.y + 19, // Shadow color
-            else => self.y + 2,
-        };
-
-        const indicator_x = switch (self.focused_component) {
-            4 => self.x + 28, // Secondary color picker
-            else => self.x,
-        };
-
-        try r.drawText(indicator_x, indicator_y, focus_indicator, indicator_style);
+        // Only draw the indicator for visible components
+        if (self.isComponentVisible(self.focused_component)) {
+            const pos = self.getIndicatorPosition(self.focused_component);
+            try r.drawText(pos[0], pos[1], focus_indicator, indicator_style);
+        }
 
         // Render any dropdown overlays last so they appear above the panel content
         try self.animation_type_dropdown.renderOverlay(r);

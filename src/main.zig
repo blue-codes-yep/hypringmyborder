@@ -103,7 +103,8 @@ fn runWithSavedConfig(allocator: std.mem.Allocator) !void {
 
     // Animation loop
     var timer = try std.time.Timer.start();
-    const frame_time_ns = std.time.ns_per_s / animation_config.fps;
+    const safe_fps = if (animation_config.fps >= 1) animation_config.fps else 1;
+    const frame_time_ns = std.time.ns_per_s / safe_fps;
 
     while (true) {
         const elapsed = @as(f64, @floatFromInt(timer.lap())) / std.time.ns_per_s;

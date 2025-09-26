@@ -10,6 +10,7 @@ pub const ValidationError = utils.validation.ValidationError;
 pub const AnimationType = enum {
     rainbow,
     pulse,
+    none,
     gradient,
     solid,
 
@@ -17,6 +18,7 @@ pub const AnimationType = enum {
         return switch (self) {
             .rainbow => "rainbow",
             .pulse => "pulse",
+            .none => "none",
             .gradient => "gradient",
             .solid => "solid",
         };
@@ -25,6 +27,7 @@ pub const AnimationType = enum {
     pub fn fromString(str: []const u8) ?AnimationType {
         if (std.mem.eql(u8, str, "rainbow")) return .rainbow;
         if (std.mem.eql(u8, str, "pulse")) return .pulse;
+        if (std.mem.eql(u8, str, "none")) return .none;
         if (std.mem.eql(u8, str, "gradient")) return .gradient;
         if (std.mem.eql(u8, str, "solid")) return .solid;
         return null;

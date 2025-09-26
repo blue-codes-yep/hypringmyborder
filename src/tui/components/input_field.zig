@@ -323,6 +323,22 @@ pub fn validateFloat(text: []const u8) ValidationResult {
     return ValidationResult.valid;
 }
 
+pub fn validateFpsInput(text: []const u8) ValidationResult {
+    if (text.len == 0) {
+        return ValidationResult{ .invalid = "Please enter a number" };
+    }
+
+    const value = std.fmt.parseInt(i32, text, 10) catch {
+        return ValidationResult{ .invalid = "Invalid number format" };
+    };
+
+    if (value < 1 or value > 120) {
+        return ValidationResult{ .invalid = "FPS must be 1-120" };
+    }
+
+    return ValidationResult.valid;
+}
+
 pub fn validateHexColor(text: []const u8) ValidationResult {
     if (text.len == 0) {
         return ValidationResult{ .invalid = "Please enter a color" };
