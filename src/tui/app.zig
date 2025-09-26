@@ -472,6 +472,11 @@ pub const TUIApp = struct {
             const terminal_size = self.renderer.getTerminalSize();
             self.preset_management_panel = try screens.PresetManagementPanel.init(self.allocator, 2, 2, terminal_size.width - 4, terminal_size.height - 4);
         }
+
+        // Always update with current config
+        if (self.preset_management_panel) |*panel| {
+            panel.setCurrentConfig(&self.current_config);
+        }
     }
 
     fn renderAnimationSettingsScreen(self: *TUIApp) !void {

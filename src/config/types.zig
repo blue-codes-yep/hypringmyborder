@@ -149,15 +149,61 @@ pub const Preset = struct {
 
         const owned_name = try allocator.dupe(u8, name);
 
+        // Deep-copy the config.colors so the Preset owns any allocated strings
+        var copied_colors: std.ArrayList(ColorFormat) = std.ArrayList(ColorFormat){};
+        // Make a local copy of the source colors so we can free its backing storage
+        var src_colors = config.colors;
+        var success: bool = false;
+        defer if (!success) copied_colors.deinit(allocator);
+
+        for (src_colors.items) |color| {
+            switch (color) {
+                .hex => |hex| {
+                    const dup = try allocator.dupe(u8, hex);
+                    try copied_colors.append(allocator, ColorFormat{ .hex = dup });
+                },
+                .rgb => |rgb| {
+                    try copied_colors.append(allocator, ColorFormat{ .rgb = rgb });
+                },
+                .hsv => |hsv| {
+                    try copied_colors.append(allocator, ColorFormat{ .hsv = hsv });
+                },
+            }
+        }
+
+        success = true;
+
+        // We've successfully copied the colors into our owned list. The caller
+        // handed ownership of their colors list to us by convention, so free
+        // the source backing storage now to avoid leaks of the array buffer.
+        src_colors.deinit(allocator);
+
+        const copied_config = AnimationConfig{
+            .animation_type = config.animation_type,
+            .fps = config.fps,
+            .speed = config.speed,
+            .colors = copied_colors,
+            .direction = config.direction,
+        };
+
         return Preset{
             .name = owned_name,
-            .config = config,
+            .config = copied_config,
             .created_at = std.time.timestamp(),
         };
     }
 
     pub fn deinit(self: *Preset, allocator: std.mem.Allocator) void {
-        allocator.free(self.name);
+        // Free any hex strings that this Preset owns. Preset.init duplicates
+        // hex strings when copying the config, so we must free them here.
+        for (self.config.colors.items) |color| {
+            switch (color) {
+                .hex => |hex| allocator.free(hex),
+                else => {},
+            }
+        }
+
         self.config.deinit(allocator);
+        allocator.free(self.name);
     }
 };

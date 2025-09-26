@@ -68,6 +68,7 @@ pub fn build(b: *std.Build) void {
         "src/main.zig",
         "tests/test_config.zig",
         "tests/test_animations.zig",
+        "tests/test_preview_concurrency.zig",
         "tests/test_preview.zig",
         "tests/test_hyprland_ipc.zig",
         "tests/test_tui_components.zig",

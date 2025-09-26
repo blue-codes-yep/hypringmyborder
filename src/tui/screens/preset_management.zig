@@ -43,6 +43,9 @@ pub const PresetManagementPanel = struct {
     component_count: usize = 3, // list, input, dropdown
     visible: bool = true,
 
+    // Current configuration for saving presets
+    current_config: ?*const config.AnimationConfig = null,
+
     // Status and feedback
     last_status_message: []const u8 = "",
     status_color: renderer.Color = renderer.Color.WHITE,
@@ -75,7 +78,19 @@ pub const PresetManagementPanel = struct {
     }
 
     pub fn deinit(self: *PresetManagementPanel) void {
+        // Free any allocated preset names inside presets
+        for (self.presets.items) |preset| {
+            // Each preset is owned, free its name and deinit its config
+            var p = preset;
+            p.deinit(self.allocator);
+        }
         self.presets.deinit(self.allocator);
+
+        // Free list item texts (they may have been duplicated when adding to the list)
+        for (self.preset_list.items.items) |item| {
+            // item.text was allocated via allocator.dupe in loadPresets
+            self.allocator.free(item.text);
+        }
         self.preset_list.deinit();
         self.preset_name_input.deinit();
         self.action_dropdown.deinit();
@@ -103,7 +118,20 @@ pub const PresetManagementPanel = struct {
         self.preset_list.clear();
 
         // Load presets from config system
-        var loaded_presets_map = try config.presets.loadPresets(self.allocator);
+        self.updateStatus("Loading presets...", .{}, renderer.Color.CYAN);
+
+        var loaded_presets_map = config.presets.loadPresets(self.allocator) catch |err| {
+            // Handle loading errors gracefully
+            const error_msg = switch (err) {
+                error.OutOfMemory => "Out of memory",
+                error.AccessDenied => "Permission denied",
+                error.FileNotFound => "Preset file not found (this is normal for first run)",
+                else => @errorName(err),
+            };
+            self.updateStatus("Load error: {s}", .{error_msg}, renderer.Color.YELLOW);
+            return; // Return with empty preset list
+        };
+
         defer {
             var iterator = loaded_presets_map.iterator();
             while (iterator.next()) |entry| {
@@ -118,14 +146,37 @@ pub const PresetManagementPanel = struct {
         var iterator = loaded_presets_map.iterator();
         while (iterator.next()) |entry| {
             const preset = entry.value_ptr.*;
-            try self.presets.append(self.allocator, preset);
+
+            // Deep copy preset: duplicate name and colors so panel owns them
+            const copied_name = try self.allocator.dupe(u8, preset.name);
+            var copied_config: config.AnimationConfig = config.AnimationConfig{
+                .animation_type = preset.config.animation_type,
+                .fps = preset.config.fps,
+                .speed = preset.config.speed,
+                .colors = std.ArrayList(config.ColorFormat){},
+                .direction = preset.config.direction,
+            };
+
+            // Copy colors
+            for (preset.config.colors.items) |color| {
+                const copied_color = config.ColorFormat{ .hex = try self.allocator.dupe(u8, color.hex) };
+                try copied_config.colors.append(self.allocator, copied_color);
+            }
+
+            const owned_preset = config.Preset{
+                .name = copied_name,
+                .config = copied_config,
+                .created_at = preset.created_at,
+            };
+
+            try self.presets.append(self.allocator, owned_preset);
 
             // Create display text with status indicator
             var display_buf: [128]u8 = undefined;
             const status_indicator = if (self.current_preset_name != null and
                 std.mem.eql(u8, preset.name, self.current_preset_name.?)) " [ACTIVE]" else "";
 
-            const display_text = try std.fmt.bufPrint(display_buf[0..], "{s}{s}", .{ preset.name, status_indicator });
+            const display_text = try std.fmt.bufPrint(display_buf[0..], "{s}{s}", .{ owned_preset.name, status_indicator });
 
             // We need to allocate the display text since it goes out of scope
             const allocated_text = try self.allocator.dupe(u8, display_text);
@@ -133,7 +184,11 @@ pub const PresetManagementPanel = struct {
             preset_count += 1;
         }
 
-        self.updateStatus("Loaded {} presets", .{preset_count}, renderer.Color.GREEN);
+        if (preset_count == 0) {
+            self.updateStatus("No presets found - create your first preset!", .{}, renderer.Color.CYAN);
+        } else {
+            self.updateStatus("Loaded {} presets", .{preset_count}, renderer.Color.GREEN);
+        }
     }
 
     fn updateFocus(self: *PresetManagementPanel) void {
@@ -192,13 +247,23 @@ pub const PresetManagementPanel = struct {
                             try self.executeAction();
                             return true;
                         }
+                        return false;
                     },
                     .char => {
+                        // Skip character handling if it's from an Enter key press
                         if (key_event.char) |c| {
+                            if (c == '\r' or c == '\n') {
+                                return false;
+                            }
                             switch (c) {
                                 'r', 'R' => {
                                     // Refresh preset list
                                     try self.loadPresets();
+                                    return true;
+                                },
+                                't', 'T' => {
+                                    // Test preset path (debug function)
+                                    try self.testPresetPath();
                                     return true;
                                 },
                                 'l', 'L' => {
@@ -383,10 +448,48 @@ pub const PresetManagementPanel = struct {
     }
 
     fn createPreset(self: *PresetManagementPanel, name: []const u8) !void {
-        // Get current animation config (this would come from the main app state)
-        const current_config = config.AnimationConfig.default(); // Placeholder
+        // Use the current config if available, otherwise create a default one
+        var config_to_save: config.AnimationConfig = undefined;
 
-        try config.presets.savePreset(self.allocator, name, &current_config);
+        if (self.current_config) |current| {
+            // Make a copy of the current config
+            config_to_save = config.AnimationConfig{
+                .animation_type = current.animation_type,
+                .fps = current.fps,
+                .speed = current.speed,
+                .colors = std.ArrayList(config.ColorFormat){},
+                .direction = current.direction,
+            };
+
+            // Copy colors
+            for (current.colors.items) |color| {
+                const copied_color = config.ColorFormat{ .hex = try self.allocator.dupe(u8, color.hex) };
+                try config_to_save.colors.append(self.allocator, copied_color);
+            }
+        } else {
+            // Create a default config with some colors
+            config_to_save = config.AnimationConfig.default();
+            config_to_save.colors = std.ArrayList(config.ColorFormat){};
+
+            // Add some default colors
+            const red_color = config.ColorFormat{ .hex = try self.allocator.dupe(u8, "#FF0000") };
+            const blue_color = config.ColorFormat{ .hex = try self.allocator.dupe(u8, "#0000FF") };
+            try config_to_save.colors.append(self.allocator, red_color);
+            try config_to_save.colors.append(self.allocator, blue_color);
+        }
+
+        config.presets.savePreset(self.allocator, name, &config_to_save) catch |err| {
+            // More detailed error reporting
+            const error_msg = switch (err) {
+                error.OutOfMemory => "Out of memory",
+                error.AccessDenied => "Permission denied - check config directory permissions",
+                error.FileNotFound => "Config directory not found",
+                error.WriteError => "Failed to write preset file",
+                else => @errorName(err),
+            };
+            self.updateStatus("Failed to save preset: {s}", .{error_msg}, renderer.Color.RED);
+            return;
+        };
         self.updateStatus("Created preset: {s}", .{name}, renderer.Color.GREEN);
 
         // Refresh the list
@@ -468,7 +571,7 @@ pub const PresetManagementPanel = struct {
         const help_text = if (self.dialog_mode != DialogMode.none)
             "Enter: Confirm | Esc: Cancel"
         else
-            "Tab: Next | Enter: Execute | R: Refresh | L: Load | D: Delete";
+            "Tab: Next | Enter: Execute | R: Refresh | L: Load | D: Delete | T: Test Path";
 
         try r.drawText(self.x + 2, self.y + self.height - 1, help_text, renderer.TextStyle{
             .fg_color = renderer.Color{ .r = 128, .g = 128, .b = 128 },
@@ -476,7 +579,7 @@ pub const PresetManagementPanel = struct {
 
         // Render focus indicator
         if (self.dialog_mode == DialogMode.none) {
-            const focus_indicator = "►";
+            const focus_indicator = ">";
             const indicator_style = renderer.TextStyle{
                 .fg_color = renderer.Color.YELLOW,
                 .bold = true,
@@ -555,6 +658,10 @@ pub const PresetManagementPanel = struct {
         try self.loadPresets(); // Refresh to show active indicator
     }
 
+    pub fn setCurrentConfig(self: *PresetManagementPanel, current_config: *const config.AnimationConfig) void {
+        self.current_config = current_config;
+    }
+
     pub fn getSelectedPresetName(self: *const PresetManagementPanel) ?[]const u8 {
         if (self.preset_list.getSelectedIndex()) |index| {
             if (index < self.presets.items.len) {
@@ -562,6 +669,49 @@ pub const PresetManagementPanel = struct {
             }
         }
         return null;
+    }
+
+    fn testPresetPath(self: *PresetManagementPanel) !void {
+        // Debug function to test preset path and directory
+        const preset_path = config.presets.getPresetsPath(self.allocator) catch |err| {
+            self.updateStatus("Error getting preset path: {s}", .{@errorName(err)}, renderer.Color.RED);
+            return;
+        };
+        defer self.allocator.free(preset_path);
+
+        // Check if directory exists
+        const config_dir = config.persistence.getConfigDir(self.allocator) catch |err| {
+            self.updateStatus("Error getting config dir: {s}", .{@errorName(err)}, renderer.Color.RED);
+            return;
+        };
+        defer self.allocator.free(config_dir);
+
+        const hypr_dir = try std.fmt.allocPrint(self.allocator, "{s}/hypringmyborder", .{config_dir});
+        defer self.allocator.free(hypr_dir);
+
+        // Try to access the directory
+        std.fs.accessAbsolute(hypr_dir, .{}) catch |err| {
+            if (err == error.FileNotFound) {
+                self.updateStatus("Config dir doesn't exist: {s}", .{hypr_dir}, renderer.Color.YELLOW);
+                return;
+            } else {
+                self.updateStatus("Config dir error: {s}", .{@errorName(err)}, renderer.Color.RED);
+                return;
+            }
+        };
+
+        // Check if preset file exists
+        std.fs.accessAbsolute(preset_path, .{}) catch |err| {
+            if (err == error.FileNotFound) {
+                self.updateStatus("Preset file doesn't exist yet: {s}", .{preset_path}, renderer.Color.CYAN);
+                return;
+            } else {
+                self.updateStatus("Preset file error: {s}", .{@errorName(err)}, renderer.Color.RED);
+                return;
+            }
+        };
+
+        self.updateStatus("Preset path OK: {s}", .{preset_path}, renderer.Color.GREEN);
     }
 
     pub fn setPosition(self: *PresetManagementPanel, x: u16, y: u16) void {

@@ -269,7 +269,7 @@ pub const List = struct {
             const y = self.y + @as(u16, @intCast(i));
             const is_thumb = (i >= thumb_pos and i < thumb_pos + thumb_size);
 
-            const char = if (is_thumb) "█" else "░";
+            const char = if (is_thumb) "#" else ".";
             const style = renderer.TextStyle{
                 .fg_color = if (is_thumb) renderer.Color.WHITE else renderer.Color{ .r = 64, .g = 64, .b = 64 },
             };

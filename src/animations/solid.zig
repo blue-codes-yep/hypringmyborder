@@ -10,6 +10,8 @@ const SolidAnimation = struct {
     colors: std.ArrayList(config.ColorFormat),
     current_color_index: usize = 0,
     allocator: std.mem.Allocator,
+    last_applied_color: ?[]const u8 = null,
+    border_set: bool = false,
 
     pub fn init(allocator: std.mem.Allocator) SolidAnimation {
         return SolidAnimation{
@@ -21,21 +23,39 @@ const SolidAnimation = struct {
     pub fn update(self: *SolidAnimation, allocator: std.mem.Allocator, socket_path: []const u8, time: f64) !void {
         _ = time; // Time parameter not used for solid colors
 
+        var target_color: []const u8 = undefined;
+        var should_free_target = false;
+
         if (self.colors.items.len == 0) {
             // Default to white if no colors configured
-            try utils.hyprland.updateSolidBorder(allocator, socket_path, "#ffffff");
-            return;
+            target_color = "#ffffff";
+        } else {
+            const color = self.colors.items[self.current_color_index];
+            target_color = try color.toHex(allocator);
+            should_free_target = true;
         }
+        defer if (should_free_target) allocator.free(target_color);
 
-        const color = self.colors.items[self.current_color_index];
-        const hex_color = try color.toHex(allocator);
-        defer allocator.free(hex_color);
+        // Only update if color changed or not set yet
+        const should_update = if (self.last_applied_color) |last_color|
+            !std.mem.eql(u8, last_color, target_color)
+        else
+            true;
 
-        // Convert to Hyprland format
-        const hypr_color = try convertToHyprlandColor(allocator, hex_color);
-        defer allocator.free(hypr_color);
+        if (should_update) {
+            // Convert to Hyprland format
+            const hypr_color = try convertToHyprlandColor(allocator, target_color);
+            defer allocator.free(hypr_color);
 
-        try utils.hyprland.updateSolidBorder(allocator, socket_path, hypr_color);
+            try utils.hyprland.updateSolidBorder(allocator, socket_path, hypr_color);
+
+            // Update last applied color
+            if (self.last_applied_color) |old_color| {
+                allocator.free(old_color);
+            }
+            self.last_applied_color = try allocator.dupe(u8, target_color);
+            self.border_set = true;
+        }
     }
 
     pub fn configure(self: *SolidAnimation, animation_config: config.AnimationConfig) !void {
@@ -45,12 +65,20 @@ const SolidAnimation = struct {
             try self.colors.append(self.allocator, color);
         }
 
-        // Reset to first color
+        // Reset to first color and force update
         self.current_color_index = 0;
+        if (self.last_applied_color) |old_color| {
+            self.allocator.free(old_color);
+            self.last_applied_color = null;
+        }
+        self.border_set = false;
     }
 
     pub fn cleanup(self: *SolidAnimation) void {
         self.colors.deinit(self.allocator);
+        if (self.last_applied_color) |color| {
+            self.allocator.free(color);
+        }
     }
 
     pub fn setColorIndex(self: *SolidAnimation, index: usize) void {

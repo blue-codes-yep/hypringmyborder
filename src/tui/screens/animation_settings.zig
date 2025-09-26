@@ -71,6 +71,8 @@ pub const AnimationSettingsPanel = struct {
         self.secondary_color_picker.deinit();
         self.gradient_angle_input.deinit();
         self.shadow_color_picker.deinit();
+        // Free any allocated strings in the animation config
+        self.animation_config.deinit(self.allocator);
     }
 
     fn setupComponents(self: *AnimationSettingsPanel) !void {
@@ -189,8 +191,13 @@ pub const AnimationSettingsPanel = struct {
             self.animation_config.fps = std.fmt.parseInt(u32, self.fps_input.getText(), 10) catch 60;
         }
 
-        // Update colors array
-        // Clear existing colors
+        // Update colors array - properly clean up old colors first
+        for (self.animation_config.colors.items) |color| {
+            switch (color) {
+                .hex => |hex_str| self.allocator.free(hex_str),
+                else => {},
+            }
+        }
         self.animation_config.colors.clearRetainingCapacity();
 
         // Add primary color
@@ -443,7 +450,7 @@ pub const AnimationSettingsPanel = struct {
         try r.drawText(self.x + 2, self.y + self.height - 1, "Tab: Next field | P: Toggle preview", renderer.TextStyle{ .fg_color = renderer.Color{ .r = 128, .g = 128, .b = 128 } });
 
         // Focus indicator
-        const focus_indicator = "►";
+        const focus_indicator = ">";
         const indicator_style = renderer.TextStyle{
             .fg_color = renderer.Color.YELLOW,
             .bold = true,
@@ -466,6 +473,9 @@ pub const AnimationSettingsPanel = struct {
         };
 
         try r.drawText(indicator_x, indicator_y, focus_indicator, indicator_style);
+
+        // Render any dropdown overlays last so they appear above the panel content
+        try self.animation_type_dropdown.renderOverlay(r);
     }
 
     pub fn getAnimationConfig(self: *const AnimationSettingsPanel) config.AnimationConfig {

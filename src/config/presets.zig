@@ -9,6 +9,9 @@ pub const PresetError = error{
     PresetNotFound,
     PresetAlreadyExists,
     InvalidPresetName,
+    InvalidConfig,
+    WriteError,
+    ReadError,
 };
 
 pub fn getPresetsPath(allocator: std.mem.Allocator) ![]u8 {
@@ -24,12 +27,22 @@ pub fn loadPresets(allocator: std.mem.Allocator) !std.StringHashMap(types.Preset
 
     var presets = std.StringHashMap(types.Preset).init(allocator);
 
+    // Try to open the presets file
+    std.log.debug("Loading presets from: {s}", .{presets_path});
+
     const file = std.fs.openFileAbsolute(presets_path, .{ .mode = .read_only }) catch |err| switch (err) {
         error.FileNotFound => {
-            // No presets file exists yet, return empty map
+            std.log.info("No presets file found at {s}, creating new preset storage", .{presets_path});
             return presets;
         },
-        else => return err,
+        error.AccessDenied => {
+            std.log.err("Access denied while reading presets file: {s}", .{presets_path});
+            return err;
+        },
+        else => {
+            std.log.err("Error opening presets file: {s} ({s})", .{ presets_path, @errorName(err) });
+            return err;
+        },
     };
     defer file.close();
 
@@ -66,7 +79,7 @@ pub fn loadPresets(allocator: std.mem.Allocator) !std.StringHashMap(types.Preset
         const created_at = preset_obj.get("created_at").?.integer;
 
         // Parse colors
-        var colors: std.ArrayList(types.ColorFormat) = .{};
+        var colors = std.ArrayList(types.ColorFormat){};
         const colors_array = preset_obj.get("colors").?.array;
 
         for (colors_array.items) |color_value| {
@@ -101,55 +114,79 @@ pub fn savePresets(allocator: std.mem.Allocator, presets: *const std.StringHashM
     const presets_path = try getPresetsPath(allocator);
     defer allocator.free(presets_path);
 
-    // Create JSON representation
-    var json_obj = std.json.ObjectMap.init(allocator);
-    defer json_obj.deinit();
-
-    var iterator = presets.iterator();
-    while (iterator.next()) |entry| {
-        const preset = entry.value_ptr.*;
-
-        var preset_obj = std.json.ObjectMap.init(allocator);
-        defer preset_obj.deinit();
-
-        try preset_obj.put("animation_type", std.json.Value{ .string = preset.config.animation_type.toString() });
-        try preset_obj.put("fps", std.json.Value{ .integer = @intCast(preset.config.fps) });
-        try preset_obj.put("speed", std.json.Value{ .float = preset.config.speed });
-        try preset_obj.put("direction", std.json.Value{ .string = preset.config.direction.toString() });
-        try preset_obj.put("created_at", std.json.Value{ .integer = preset.created_at });
-
-        // Convert colors to JSON array
-        var colors_array = std.json.Array.init(allocator);
-        defer colors_array.deinit();
-
-        for (preset.config.colors.items) |color| {
-            const hex_color = try color.toHex(allocator);
-            defer allocator.free(hex_color);
-            try colors_array.append(std.json.Value{ .string = hex_color });
-        }
-
-        try preset_obj.put("colors", std.json.Value{ .array = colors_array });
-
-        try json_obj.put(preset.name, std.json.Value{ .object = preset_obj });
-    }
-
-    const json_value = std.json.Value{ .object = json_obj };
-
-    // Write to file
+    // Write to file using a simpler approach
     const file = std.fs.createFileAbsolute(presets_path, .{ .truncate = true }) catch {
         return error.WriteError;
     };
     defer file.close();
 
-    var out: std.Io.Writer.Allocating = .init(allocator);
-    defer out.deinit();
+    // Write directly to the file
+    _ = try file.write("{\n");
 
-    try std.json.Stringify.value(json_value, .{}, &out.writer);
-    try file.writeAll(out.written());
+    var iterator = presets.iterator();
+    var first = true;
+    while (iterator.next()) |entry| {
+        const preset = entry.value_ptr.*;
+
+        if (!first) {
+            _ = try file.write(",\n");
+        }
+        first = false;
+
+        // Write preset entry
+        var buf: [256]u8 = undefined;
+
+        _ = try file.write("  \"");
+        _ = try file.write(preset.name);
+        _ = try file.write("\": {\n");
+        _ = try file.write("    \"animation_type\": \"");
+        _ = try file.write(preset.config.animation_type.toString());
+        _ = try file.write("\",\n");
+
+        const fps_str = try std.fmt.bufPrint(&buf, "    \"fps\": {},\n", .{preset.config.fps});
+        _ = try file.write(fps_str);
+
+        const speed_str = try std.fmt.bufPrint(&buf, "    \"speed\": {},\n", .{preset.config.speed});
+        _ = try file.write(speed_str);
+
+        _ = try file.write("    \"direction\": \"");
+        _ = try file.write(preset.config.direction.toString());
+        _ = try file.write("\",\n");
+
+        const created_str = try std.fmt.bufPrint(&buf, "    \"created_at\": {},\n", .{preset.created_at});
+        _ = try file.write(created_str);
+
+        // Write colors array
+        _ = try file.write("    \"colors\": [");
+        for (preset.config.colors.items, 0..) |color, i| {
+            if (i > 0) _ = try file.write(", ");
+            const hex_color = try color.toHex(allocator);
+            defer allocator.free(hex_color);
+            _ = try file.write("\"");
+            _ = try file.write(hex_color);
+            _ = try file.write("\"");
+        }
+        _ = try file.write("]\n  }");
+    }
+
+    _ = try file.write("\n}\n");
+    try file.sync(); // Ensure the data is written to disk
 }
 
 pub fn savePreset(allocator: std.mem.Allocator, name: []const u8, config: *const types.AnimationConfig) !void {
-    if (name.len == 0) return PresetError.InvalidPresetName;
+    // Validate preset name
+    if (name.len == 0) {
+        std.log.err("Cannot save preset: Empty preset name", .{});
+        return PresetError.InvalidPresetName;
+    }
+
+    // Validate config
+    if (config.colors.items.len == 0) {
+        std.log.err("Cannot save preset '{s}': No colors defined", .{name});
+        return error.InvalidConfig;
+    }
+
+    std.log.info("Saving preset '{s}' with type {s}", .{ name, config.animation_type.toString() });
 
     var presets = try loadPresets(allocator);
     defer {

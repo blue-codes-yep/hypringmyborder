@@ -134,18 +134,18 @@ pub const ProgressBar = struct {
 
     fn getFilledChar(self: *const ProgressBar) []const u8 {
         return switch (self.style) {
-            .blocks => "█",
+            .blocks => "#",
             .bars => "|",
-            .dots => "●",
+            .dots => "*",
             .ascii => "=",
         };
     }
 
     fn getEmptyChar(self: *const ProgressBar) []const u8 {
         return switch (self.style) {
-            .blocks => "░",
+            .blocks => ".",
             .bars => "-",
-            .dots => "○",
+            .dots => "o",
             .ascii => "-",
         };
     }

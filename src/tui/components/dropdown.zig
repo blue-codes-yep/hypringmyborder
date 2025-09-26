@@ -277,7 +277,7 @@ pub const Dropdown = struct {
         const arrow_x = self.x + self.width - 2;
         try r.moveCursor(arrow_x, self.y);
 
-        const arrow = if (self.is_open) "▲" else "▼";
+        const arrow = if (self.is_open) "^" else "v";
         try r.stdout_file.writeAll(arrow);
 
         try r.resetStyle();
@@ -354,7 +354,7 @@ pub const Dropdown = struct {
             const y = list_y + @as(u16, @intCast(i));
             const is_thumb = (i >= thumb_pos and i < thumb_pos + thumb_size);
 
-            const char = if (is_thumb) "█" else "░";
+            const char = if (is_thumb) "#" else ".";
             const style = renderer.TextStyle{
                 .fg_color = if (is_thumb) renderer.Color.WHITE else renderer.Color{ .r = 64, .g = 64, .b = 64 },
             };
@@ -397,5 +397,12 @@ pub const Dropdown = struct {
 
     pub fn isOpen(self: *const Dropdown) bool {
         return self.is_open;
+    }
+
+    pub fn renderOverlay(self: *const Dropdown, r: *renderer.Renderer) !void {
+        if (!self.visible) return;
+        if (self.is_open) {
+            try self.renderDropdownList(r);
+        }
     }
 };

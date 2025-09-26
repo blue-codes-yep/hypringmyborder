@@ -60,6 +60,10 @@ pub const PreviewManager = struct {
     // Animation provider
     animation_provider: ?animations.AnimationProvider = null,
 
+    // Original border state (to restore when stopping preview)
+    original_border_saved: bool = false,
+    original_border_config: ?[]const u8 = null,
+
     pub fn init(allocator: std.mem.Allocator) !PreviewManager {
         const socket_path = try utils.hyprland.getSocketPath(allocator);
 
@@ -80,8 +84,52 @@ pub const PreviewManager = struct {
         // Validate the new configuration
         try new_config.validate();
 
-        // Update configuration atomically
-        self.current_config = new_config;
+        // Deep-copy the configuration so the preview thread owns its memory.
+        // This avoids use-after-free when the UI updates or frees strings while
+        // the preview thread is reading them.
+        var copied_colors: std.ArrayList(config.ColorFormat) = std.ArrayList(config.ColorFormat){};
+        var success: bool = false;
+        // On error, free any duplicated strings we already allocated.
+        defer if (!success) {
+            for (copied_colors.items) |c| {
+                switch (c) {
+                    .hex => |h| {
+                        self.allocator.free(h);
+                    },
+                    else => {},
+                }
+            }
+            copied_colors.deinit(self.allocator);
+        };
+
+        for (new_config.colors.items) |color| {
+            switch (color) {
+                .hex => |hex| {
+                    const dup = try self.allocator.dupe(u8, hex);
+                    try copied_colors.append(self.allocator, config.ColorFormat{ .hex = dup });
+                },
+                .rgb => |rgb| {
+                    try copied_colors.append(self.allocator, config.ColorFormat{ .rgb = rgb });
+                },
+                .hsv => |hsv| {
+                    try copied_colors.append(self.allocator, config.ColorFormat{ .hsv = hsv });
+                },
+            }
+        }
+
+        success = true;
+
+        // Free old config resources before replacing
+        self.current_config.deinit(self.allocator);
+
+        self.current_config = config.AnimationConfig{
+            .animation_type = new_config.animation_type,
+            .fps = new_config.fps,
+            .speed = new_config.speed,
+            .colors = copied_colors,
+            .direction = new_config.direction,
+        };
+
         self.config_changed.store(true, .release);
     }
 
@@ -94,6 +142,9 @@ pub const PreviewManager = struct {
             self.status.store(@intFromEnum(PreviewStatus.err), .release);
             return error.HyprlandConnectionFailed;
         }
+
+        // Save current border state before starting preview
+        try self.saveOriginalBorderState();
 
         self.status.store(@intFromEnum(PreviewStatus.starting), .release);
         self.should_stop.store(false, .release);
@@ -123,6 +174,9 @@ pub const PreviewManager = struct {
             self.animation_provider = null;
         }
 
+        // Restore original border state
+        self.restoreOriginalBorderState();
+
         self.status.store(@intFromEnum(PreviewStatus.stopped), .release);
     }
 
@@ -146,7 +200,47 @@ pub const PreviewManager = struct {
 
     pub fn deinit(self: *PreviewManager) void {
         self.stop();
+
+        // Clean up saved border state
+        if (self.original_border_config) |border_config| {
+            self.allocator.free(border_config);
+        }
+        // Free any allocated config resources
+        self.current_config.deinit(self.allocator);
+
         self.allocator.free(self.socket_path);
+    }
+
+    /// Save the current border configuration before starting preview
+    fn saveOriginalBorderState(self: *PreviewManager) !void {
+        if (self.original_border_saved) return; // Already saved
+
+        // Get current border configuration from Hyprland
+        const current_config = utils.hyprland.getCurrentBorderConfig(self.allocator, self.socket_path) catch |err| {
+            // If we can't get current config, just continue - preview will work but won't restore
+            std.log.warn("Could not save original border state: {}", .{err});
+            return;
+        };
+
+        self.original_border_config = current_config;
+        self.original_border_saved = true;
+    }
+
+    /// Restore the original border configuration after stopping preview
+    fn restoreOriginalBorderState(self: *PreviewManager) void {
+        if (!self.original_border_saved or self.original_border_config == null) return;
+
+        // Restore the original border configuration
+        utils.hyprland.setBorderConfig(self.socket_path, self.original_border_config.?) catch |err| {
+            std.log.warn("Could not restore original border state: {}", .{err});
+        };
+
+        // Clean up
+        if (self.original_border_config) |border_config| {
+            self.allocator.free(border_config);
+            self.original_border_config = null;
+        }
+        self.original_border_saved = false;
     }
 
     /// Main preview thread function with proper error handling and animation provider integration

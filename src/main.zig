@@ -121,6 +121,13 @@ fn runWithSavedConfig(allocator: std.mem.Allocator) !void {
 
 /// Run Terminal User Interface
 fn runTUI(allocator: std.mem.Allocator) !void {
+    // Initialize crash logger
+    utils.crash_logger.initCrashLogger(allocator) catch |err| {
+        std.debug.print("Warning: Could not initialize crash logger: {s}\n", .{@errorName(err)});
+    };
+    // Register signal handlers so fatal signals flush logs
+    utils.crash_logger.registerSignalHandlers();
+    defer utils.crash_logger.deinitCrashLogger();
     // Check environment and show status
     const env_status = utils.environment.checkEnvironment(allocator) catch |err| {
         std.debug.print("Error checking environment: {s}\n", .{@errorName(err)});
@@ -145,13 +152,21 @@ fn runTUI(allocator: std.mem.Allocator) !void {
 
     // Initialize and run TUI application
     var tui_app = tui.TUIApp.init(allocator) catch |err| {
+        utils.crash_logger.logMessage("Error initializing TUI: {s}", .{@errorName(err)}) catch {};
         std.debug.print("Error initializing TUI: {s}\n", .{@errorName(err)});
         return;
     };
     defer tui_app.deinit();
 
+    // Log TUI startup
+    utils.crash_logger.logMessage("TUI application starting", .{}) catch {};
+
     // Run the TUI
-    try tui_app.run();
+    tui_app.run() catch |err| {
+        utils.crash_logger.logMessage("TUI runtime error: {s}", .{@errorName(err)}) catch {};
+        std.debug.print("TUI error: {s}\n", .{@errorName(err)});
+        return err;
+    };
 }
 
 /// Run interactive CLI configuration (legacy mode)

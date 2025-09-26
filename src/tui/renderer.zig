@@ -222,12 +222,12 @@ pub const Renderer = struct {
         // Draw filled portion
         var i: u16 = 0;
         while (i < filled_width) : (i += 1) {
-            try self.stdout_file.writeAll("█");
+            try self.stdout_file.writeAll("#");
         }
 
         // Draw empty portion
         while (i < width) : (i += 1) {
-            try self.stdout_file.writeAll("░");
+            try self.stdout_file.writeAll(".");
         }
     }
 

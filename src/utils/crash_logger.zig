@@ -1,0 +1,107 @@
+//! Application logging utility
+//! Logs application events and errors to a file for debugging
+
+const std = @import("std");
+
+var log_file: ?std.fs.File = null;
+var registered_signals: bool = false;
+// Import needed C symbols
+const c = @cImport({
+    @cInclude("signal.h");
+    @cInclude("unistd.h");
+    @cInclude("sys/types.h");
+    @cInclude("sys/stat.h");
+    @cInclude("fcntl.h");
+});
+
+pub fn registerSignalHandlers() void {
+    if (registered_signals) return;
+    // Register handler for SIGSEGV, SIGABRT, SIGINT
+    // Use libc signal to set handler
+    const SIGSEGV = c.SIGSEGV;
+    const SIGABRT = c.SIGABRT;
+    const SIGINT = c.SIGINT;
+    _ = c.signal(SIGSEGV, signal_handler);
+    _ = c.signal(SIGABRT, signal_handler);
+    _ = c.signal(SIGINT, signal_handler);
+    registered_signals = true;
+}
+
+pub fn initCrashLogger(allocator: std.mem.Allocator) !void {
+    // Create log directory
+    const home_dir = std.process.getEnvVarOwned(allocator, "HOME") catch {
+        const log_dir_path = try std.fmt.allocPrint(allocator, "/tmp/.hypringmyborder", .{});
+        defer allocator.free(log_dir_path);
+
+        std.fs.makeDirAbsolute(log_dir_path) catch |err| switch (err) {
+            error.PathAlreadyExists => {},
+            else => return err,
+        };
+
+        const timestamp = std.time.timestamp();
+        const log_file_path = try std.fmt.allocPrint(allocator, "/tmp/.hypringmyborder/app_{d}.log", .{timestamp});
+        defer allocator.free(log_file_path);
+
+        log_file = try std.fs.createFileAbsolute(log_file_path, .{});
+
+        // Log startup
+        try logMessage("HyprIngMyBorder logger initialized (fallback)", .{});
+        try logMessage("Timestamp: {d}", .{timestamp});
+        return;
+    };
+    defer allocator.free(home_dir);
+
+    const log_dir_path = try std.fmt.allocPrint(allocator, "{s}/.hypringmyborder", .{home_dir});
+    defer allocator.free(log_dir_path);
+
+    std.fs.makeDirAbsolute(log_dir_path) catch |err| switch (err) {
+        error.PathAlreadyExists => {},
+        else => return err,
+    };
+
+    // Create log file with timestamp
+    const timestamp = std.time.timestamp();
+    const log_file_path = try std.fmt.allocPrint(allocator, "{s}/app_{d}.log", .{ log_dir_path, timestamp });
+    defer allocator.free(log_file_path);
+
+    log_file = try std.fs.createFileAbsolute(log_file_path, .{});
+
+    // Log startup
+    try logMessage("HyprIngMyBorder logger initialized", .{});
+    try logMessage("Timestamp: {d}", .{timestamp});
+}
+
+pub fn deinitCrashLogger() void {
+    if (log_file) |file| {
+        logMessage("Logger shutting down normally", .{}) catch {};
+        file.close();
+        log_file = null;
+    }
+}
+
+pub fn logMessage(comptime fmt: []const u8, args: anytype) !void {
+    if (log_file) |file| {
+        const timestamp = std.time.timestamp();
+        var buffer: [1024]u8 = undefined;
+        const message = try std.fmt.bufPrint(buffer[0..], "[{d}] " ++ fmt ++ "\n", .{timestamp} ++ args);
+        try file.writeAll(message);
+        try file.sync();
+    }
+}
+
+// Simple C signal handler that attempts to write a last log message and flush
+pub fn signal_handler(sig: c_int) callconv(.c) void {
+    // Avoid allocation here; write a simple message directly to the file descriptor if available
+    if (log_file) |file| {
+        // Try to write a minimal message
+        const msg = "FATAL SIGNAL received\n";
+        // Use low-level write via file.handle
+        const fd = file.handle; // std.fs.File.handle is an int for libc fd
+        // Use libc write and fsync from c import
+        _ = c.write(fd, msg, msg.len);
+        _ = c.fsync(fd);
+    }
+    // Re-raise default handler for the signal to terminate with default action
+    _ = c.signal(sig, c.SIG_DFL);
+    _ = c.raise(sig);
+}
